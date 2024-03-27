@@ -9,14 +9,10 @@ admin.initializeApp();
 exports.sendNotificationOnActivityCreation =
     functions.firestore.document("activity/{activityId}")
         .onCreate((snapshot, context) => {
-          // Log that the Cloud Function is triggered
-          console.log("sendNotificationOnActivityCreation triggered");
-
           // Get the new activity data
           const activityData = snapshot.data();
 
           if (activityData.category === "fromAdmin") {
-            console.log("fromAdmin category");
             return notificationHelpers.sendFromAdmin(activityData);
           } else {
             return null;
@@ -32,8 +28,7 @@ exports.sendNotificationOnPerformanceRecordCreation = functions.firestore
       const score = newRecordData.score;
       const uid = newRecordData.uid;
 
-      // Query performanceRecords collection...
-      // to count records with the same did
+      // Query performanceRecords collection to count records with the same did
       const recordsSnapshot = await admin
           .firestore()
           .collection("performanceRecords")
@@ -56,17 +51,18 @@ exports.sendNotificationOnPerformanceRecordCreation = functions.firestore
       // Check if there are at least three other performanceRecords with the same did
       if (recordsSnapshot.size > 3) {
         // Check if the new performanceRecord has the highest score
-        const highestScoreSnapshot = await admin
+        const lowestScoreSnapshot = await admin
             .firestore()
             .collection("performanceRecords")
             .where("did", "==", did)
-            .orderBy("score", "desc")
-            .limit(1)
+            .orderBy("score", "asc")
+            .limit(2)
             .get();
 
-        if (!highestScoreSnapshot.empty) {
-          const highestScore = highestScoreSnapshot.docs[0].data().score;
-          if (score >= highestScore) {
+        if (!lowestScoreSnapshot.empty) {
+          const lowestScore = lowestScoreSnapshot.docs[0].data().score;
+          const secondLowestScore = lowestScoreSnapshot.docs[1].data().score;
+          if (score <= lowestScore && secondLowestScore > score) {
             const thisUser = await admin
                 .firestore()
                 .collection("users")
@@ -83,12 +79,18 @@ exports.sendNotificationOnPerformanceRecordCreation = functions.firestore
             const usersRef = admin.firestore().collection("users");
             const userSnapshot = await usersRef.get();
             const tokens = [];
+            const batch = admin.firestore().batch();
             userSnapshot.forEach((doc) => {
               const token = doc.data().fcm_token;
               if (token) {
                 tokens.push(token);
               }
+              const userRef = usersRef.doc(doc.id);
+              batch.update(userRef, {badgeCount: admin.firestore.FieldValue.increment(1)});
             });
+
+            // Commit the batch update
+            await batch.commit();
 
             // Send notification if tokens are available
             if (tokens.length > 0) {
@@ -98,7 +100,6 @@ exports.sendNotificationOnPerformanceRecordCreation = functions.firestore
                 const notifTitle = notificationTitles[Math.floor(Math.random() * notificationTitles.length)];
                 await notificationHelpers.sendNotification(tokens, notifTitle,
                     notifBody, thisUser.docs[0].data().badgeCount);
-                console.log("Notification sent successfully");
 
                 // Create record in the activity collection
                 // Get current date in EST
@@ -136,10 +137,9 @@ exports.updateNotifBadge = functions.firestore.document("/users/{userId}")
       const afterData = change.after.data();
 
       // Check if badgeCount field has changed
-      if (beforeData.badgeCount !== afterData.badgeCount && afterData.badgeCount == 0) {
+      if (beforeData.badgeCount !== afterData.badgeCount) {
         const userId = context.params.userId;
         const badgeCount = afterData.badgeCount;
-        console.log(badgeCount);
 
         // Fetch user's device token from Firestore
         return admin.firestore().doc(`/users/${userId}`).get()
