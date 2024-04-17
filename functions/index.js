@@ -50,29 +50,41 @@ exports.sendNotificationOnPerformanceRecordCreation = functions.firestore
 
       // Check if there are at least three other performanceRecords with the same did
       if (recordsSnapshot.size > 3) {
-        // Check if the new performanceRecord has the highest score
-        const lowestScoreSnapshot = await admin
+        const thisDrill = await admin
             .firestore()
-            .collection("performanceRecords")
-            .where("did", "==", did)
-            .orderBy("score", "asc")
-            .limit(2)
+            .collection("drills")
+            .where("id", "==", did)
             .get();
 
+        let lowestScoreSnapshot;
+        if (thisDrill.docs[0].data().highWins) {
+          lowestScoreSnapshot = await admin
+              .firestore()
+              .collection("performanceRecords")
+              .where("did", "==", did)
+              .orderBy("score", "desc")
+              .limit(2)
+              .get();
+        } else {
+          lowestScoreSnapshot = await admin
+              .firestore()
+              .collection("performanceRecords")
+              .where("did", "==", did)
+              .orderBy("score", "asc")
+              .limit(2)
+              .get();
+        }
+
+        // Check if the new performanceRecord has the new most extreme score
         if (!lowestScoreSnapshot.empty) {
           const lowestScore = lowestScoreSnapshot.docs[0].data().score;
           const secondLowestScore = lowestScoreSnapshot.docs[1].data().score;
-          if (score <= lowestScore && secondLowestScore > score) {
+          if ((thisDrill.docs[0].data().highWins && score >= lowestScore && secondLowestScore < score) ||
+          (!thisDrill.docs[0].data().highWins && score <= lowestScore && secondLowestScore > score)) {
             const thisUser = await admin
                 .firestore()
                 .collection("users")
                 .where("id", "==", uid)
-                .get();
-
-            const thisDrill = await admin
-                .firestore()
-                .collection("drills")
-                .where("id", "==", did)
                 .get();
 
             // Fetch tokens of all users
@@ -96,7 +108,7 @@ exports.sendNotificationOnPerformanceRecordCreation = functions.firestore
             if (tokens.length > 0) {
               try {
                 const notifBody = thisUser.docs[0].data().name +
-                " has the new highest score on " + thisDrill.docs[0].data().name;
+                " has the new best score on " + thisDrill.docs[0].data().name;
                 const notifTitle = notificationTitles[Math.floor(Math.random() * notificationTitles.length)];
                 await notificationHelpers.sendNotification(tokens, notifTitle,
                     notifBody, thisUser.docs[0].data().badgeCount);
