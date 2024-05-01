@@ -123,6 +123,7 @@ exports.sendNotificationOnPerformanceRecordCreation = functions.firestore
                 const formattedDate = estDate.toISOString().split("T")[0];
 
                 await admin.firestore().collection("activity").add({
+                  did: thisDrill.docs[0].data().id,
                   assignedGroups: [],
                   assignedUsers: [],
                   category: "leaderboard",
